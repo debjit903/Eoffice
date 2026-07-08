@@ -1,18 +1,18 @@
 <?php
 session_start();
 
-// Configuration
-$USER_DB = __DIR__ . DIRECTORY_SEPARATOR . 'users.json';
-
-// GitHub Configurations (তোর দেওয়া তথ্য অনুযায়ী সরাসরি যুক্ত করা হলো)
+// GitHub Configurations (তোর দেওয়া ক্রেডেনশিয়াল সরাসরি যুক্ত করা হলো)
 define('GH_TOKEN', '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');
 define('GH_USER', 'debjit903');
 define('GH_REPO', 'eoffice');
 
-if (!file_exists($USER_DB)) {
-    $default_users = ["admin" => ["hash" => password_hash("ad@1234", PASSWORD_DEFAULT)]];
-    file_put_contents($USER_DB, json_encode($default_users, JSON_PRETTY_PRINT));
-}
+// Hardcoded Credentials (Vercel-এ ফাইল রাইট করা যায় না, তাই সরাসরি কোডে রাখা হলো)
+// Username: admin | Password: ad@1234
+define('ADMIN_USER', 'admin');
+define('ADMIN_PASS_HASH', password_hash('ad@1234', PASSWORD_DEFAULT));
+
+$error_msg = "";
+$success_msg = "";
 
 // GitHub API Helper Functions
 function github_file_exists($filename) {
@@ -108,7 +108,8 @@ function github_list_files() {
     $files = [];
     if (is_array($data)) {
         foreach ($data as $item) {
-            if ($item['type'] === 'file' && $item['name'] !== 'vercel.json' && $item['name'] !== 'index.php' && $item['name'] !== 'users.json') {
+            // সিস্টেমেটিক ফাইল ও ফোল্ডার বাদ দিয়ে শুধু ডেটা ফাইল লিস্ট করা হচ্ছে
+            if ($item['type'] === 'file' && !in_array($item['name'], ['vercel.json', 'index.php', 'users.json'])) {
                 $files[] = $item['name'];
             }
         }
@@ -116,20 +117,15 @@ function github_list_files() {
     return $files;
 }
 
-$error_msg = "";
-$success_msg = "";
-
 // Auth Actions
 if (isset($_POST['action']) && $_POST['action'] == 'login') {
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
-    if (file_exists($USER_DB)) {
-        $users = json_decode(file_get_contents($USER_DB), true);
-        if (isset($users[$username]) && password_verify($password, $users[$username]['hash'])) {
-            $_SESSION['user'] = $username;
-            header("Location: index.php");
-            exit;
-        }
+    
+    if ($username === ADMIN_USER && password_verify($password, ADMIN_PASS_HASH)) {
+        $_SESSION['user'] = $username;
+        header("Location: index.php");
+        exit;
     }
     $error_msg = "Invalid username or password.";
 }
@@ -184,13 +180,18 @@ if (isset($_SESSION['user'])) {
                 $new_name = trim($_POST['new_name'] ?? '');
                 if (!empty($new_name) && $old_name !== $new_name) {
                     $old_url = "https://raw.githubusercontent.com/" . GH_USER . "/" . GH_REPO . "/main/" . urlencode($old_name);
-                    $content = @file_get_contents($old_url);
+                    
+                    $ctx = stream_context_create([
+                        "http" => ["header" => "Authorization: token " . GH_TOKEN . "\r\nUser-Agent: eOffice-App\r\n"]
+                    ]);
+                    $content = @file_get_contents($old_url, false, $ctx);
+                    
                     if ($content !== false) {
                         if (github_upload_file($new_name, $content)) {
                             github_delete_file($old_name);
-                            $success_msg = "File altered successfully.";
+                            $success_msg = "File altered successfully on GitHub.";
                         } else { $error_msg = "Failed to rename file."; }
-                    }
+                    } else { $error_msg = "Failed to fetch original file content for renaming."; }
                 } else { $error_msg = "Name change conflict detected."; }
                 break;
 
@@ -202,13 +203,7 @@ if (isset($_SESSION['user'])) {
                 break;
                 
             case 'change_password':
-                $new_password = $_POST['new_password'] ?? '';
-                if (strlen($new_password) >= 6) {
-                    $users = json_decode(file_get_contents($USER_DB), true);
-                    $users[$current_user]['hash'] = password_hash($new_password, PASSWORD_DEFAULT);
-                    file_put_contents($USER_DB, json_encode($users, JSON_PRETTY_PRINT));
-                    $success_msg = "Security key modified.";
-                } else { $error_msg = "Password must be >= 6 characters."; }
+                $error_msg = "Vercel-এ সরাসরি পাসওয়ার্ড ফাইল পরিবর্তন করা যায় না। কোডের শুরুতে ADMIN_PASS_HASH পরিবর্তন করিস।";
                 break;
         }
     }
